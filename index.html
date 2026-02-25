@@ -10,11 +10,14 @@
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; background: #111; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
         #panorama { width: 100%; height: 100%; }
         .controls { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 10; }
-        button { background: rgba(255, 255, 255, 0.9); border: none; padding: 12px 24px; border-radius: 30px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: 0.2s; color: #333; }
-        button:active { transform: scale(0.95); }
+        
+        /* עיצוב אחיד לכפתורים וללייבל */
+        .action-btn { background: rgba(255, 255, 255, 0.9); border: none; padding: 12px 24px; border-radius: 30px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: 0.2s; color: #333; display: inline-block; text-align: center; }
+        .action-btn:active { transform: scale(0.95); }
         #delete-btn { background: rgba(255, 60, 60, 0.9); color: white; }
+        
         #file-input { display: none; }
-        #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 20px; font-weight: bold; z-index: 20; display: none; background: rgba(0,0,0,0.7); padding: 20px; border-radius: 10px; }
+        #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 20px; font-weight: bold; z-index: 20; display: none; background: rgba(0,0,0,0.7); padding: 20px; border-radius: 10px; text-align: center; }
         .hidden { display: none !important; }
     </style>
 </head>
@@ -24,10 +27,12 @@
     <div id="loader">מעלה תמונה, אנא המתן...</div>
 
     <div class="controls">
-        <input type="file" id="file-input" accept="image/*" />
-        <button id="upload-btn">העלאת תמונה</button>
-        <button id="share-btn" class="hidden">שיתוף</button>
-        <button id="delete-btn" class="hidden">מחיקה</button>
+        <label id="upload-label" class="action-btn">
+            העלאת תמונה
+            <input type="file" id="file-input" accept="image/*" />
+        </label>
+        <button id="share-btn" class="action-btn hidden">שיתוף</button>
+        <button id="delete-btn" class="action-btn hidden">מחיקה</button>
     </div>
 
     <script type="module">
@@ -35,8 +40,11 @@
         import { getFirestore, doc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
 
-        // הכנס כאן את נתוני ההתחברות מפרויקט ה-Firebase שלך
-        const firebaseConfig = {
+        let app, db, storage;
+        
+        try {
+            // שים לב: הדבק את ההגדרות המדויקות שלך כאן ושמור על המבנה
+            const firebaseConfig = {
             apiKey: "AIzaSyDzc2-dd4hUs05864kKgL6wjWjQdjvuWq0",
             authDomain: "pano-360-c4663.firebaseapp.com",
             projectId: "pano-360-c4663",
@@ -45,9 +53,13 @@
             appId: "1:344991277519:web:4ff6ad6dc30e65fa4ff2ba"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const storage = getStorage(app);
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            storage = getStorage(app);
+        } catch (err) {
+            alert("שגיאה בהגדרת Firebase. ודא שהעתקת את ה-firebaseConfig נכון וללא טעויות תחביר.");
+            console.error(err);
+        }
 
         const urlParams = new URLSearchParams(window.location.search);
         const imageId = urlParams.get('id');
@@ -55,7 +67,7 @@
         const elements = {
             panorama: document.getElementById('panorama'),
             fileInput: document.getElementById('file-input'),
-            uploadBtn: document.getElementById('upload-btn'),
+            uploadLabel: document.getElementById('upload-label'),
             shareBtn: document.getElementById('share-btn'),
             deleteBtn: document.getElementById('delete-btn'),
             loader: document.getElementById('loader')
@@ -64,8 +76,8 @@
         let currentStoragePath = null;
 
         async function initViewer() {
-            if (imageId) {
-                elements.uploadBtn.classList.add('hidden');
+            if (imageId && db) {
+                elements.uploadLabel.classList.add('hidden');
                 elements.loader.innerText = "טוען תמונה...";
                 elements.loader.style.display = "block";
 
@@ -100,20 +112,23 @@
                     elements.loader.style.display = "none";
                     alert('שגיאה בטעינת התמונה.');
                 }
-            } else {
+            } else if (!imageId) {
                 elements.panorama.innerHTML = '<div style="color:#666; display:flex; height:100%; align-items:center; justify-content:center; font-size:24px;">לחץ על העלאת תמונה כדי להתחיל</div>';
             }
         }
-
-        elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
 
         elements.fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
 
+            if (!storage || !db) {
+                alert('החיבור ל-Firebase לא תקין, אנא רענן את העמוד.');
+                return;
+            }
+
             elements.loader.innerText = "מעלה תמונה, אנא המתן...";
             elements.loader.style.display = "block";
-            elements.uploadBtn.classList.add('hidden');
+            elements.uploadLabel.classList.add('hidden');
 
             const fileExt = file.name.split('.').pop();
             const newId = Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -138,9 +153,9 @@
 
             } catch (error) {
                 console.error("Upload failed:", error);
-                alert('שגיאה בהעלאה. נסה שוב.');
+                alert('שגיאה בהעלאה. בדוק את חוקי האבטחה (Rules) בפיירבייס.');
                 elements.loader.style.display = "none";
-                elements.uploadBtn.classList.remove('hidden');
+                elements.uploadLabel.classList.remove('hidden');
             }
         });
 
@@ -177,7 +192,7 @@
             }
         });
 
-        initViewer();
+        if(app) initViewer();
     </script>
 </body>
 </html>
