@@ -6,7 +6,6 @@
     <title>360 Viewer</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css"/>
     <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; background: #111; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
         #panorama { width: 100%; height: 100%; }
@@ -31,11 +30,24 @@
         <button id="delete-btn" class="hidden">מחיקה</button>
     </div>
 
-    <script>
-        // הכנס כאן את הנתונים מהפרויקט שלך ב-Supabase
-        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
+        import { getFirestore, doc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-storage.js";
+
+        // הכנס כאן את נתוני ההתחברות מפרויקט ה-Firebase שלך
+        const firebaseConfig = {
+            apiKey: "AIzaSyDzc2-dd4hUs05864kKgL6wjWjQdjvuWq0",
+            authDomain: "pano-360-c4663.firebaseapp.com",
+            projectId: "pano-360-c4663",
+            storageBucket: "pano-360-c4663.firebasestorage.app",
+            messagingSenderId: "344991277519",
+            appId: "1:344991277519:web:4ff6ad6dc30e65fa4ff2ba"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const storage = getStorage(app);
 
         const urlParams = new URLSearchParams(window.location.search);
         const imageId = urlParams.get('id');
@@ -57,31 +69,38 @@
                 elements.loader.innerText = "טוען תמונה...";
                 elements.loader.style.display = "block";
 
-                const { data, error } = await supabase.from('panoramas').select('*').eq('id', imageId).single();
-                
-                elements.loader.style.display = "none";
+                try {
+                    const docRef = doc(db, "panoramas", imageId);
+                    const docSnap = await getDoc(docRef);
 
-                if (data) {
-                    currentStoragePath = data.storage_path;
-                    pannellum.viewer('panorama', {
-                        "type": "equirectangular",
-                        "panorama": data.image_url,
-                        "autoLoad": true,
-                        "compass": false,
-                        "showControls": false
-                    });
+                    elements.loader.style.display = "none";
 
-                    elements.shareBtn.classList.remove('hidden');
-                    // הצג כפתור מחיקה רק אם המשתמש הוא זה שהעלה את התמונה (לפי LocalStorage)
-                    if (localStorage.getItem(`pano_owner_${imageId}`)) {
-                        elements.deleteBtn.classList.remove('hidden');
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        currentStoragePath = data.storagePath;
+                        
+                        pannellum.viewer('panorama', {
+                            "type": "equirectangular",
+                            "panorama": data.imageUrl,
+                            "autoLoad": true,
+                            "compass": false,
+                            "showControls": false
+                        });
+
+                        elements.shareBtn.classList.remove('hidden');
+                        if (localStorage.getItem(`pano_owner_${imageId}`)) {
+                            elements.deleteBtn.classList.remove('hidden');
+                        }
+                    } else {
+                        alert('התמונה לא נמצאה או שנמחקה.');
+                        window.location.href = window.location.pathname;
                     }
-                } else {
-                    alert('התמונה לא נמצאה או שנמחקה.');
-                    window.location.href = window.location.pathname;
+                } catch (error) {
+                    console.error("Error fetching document:", error);
+                    elements.loader.style.display = "none";
+                    alert('שגיאה בטעינת התמונה.');
                 }
             } else {
-                // מסך ריק להעלאה
                 elements.panorama.innerHTML = '<div style="color:#666; display:flex; height:100%; align-items:center; justify-content:center; font-size:24px;">לחץ על העלאת תמונה כדי להתחיל</div>';
             }
         }
@@ -97,35 +116,31 @@
             elements.uploadBtn.classList.add('hidden');
 
             const fileExt = file.name.split('.').pop();
-            const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
-            const filePath = `public/${fileName}`;
+            const newId = Math.random().toString(36).substring(2) + Date.now().toString(36);
+            const storagePath = `panoramas/${newId}.${fileExt}`;
+            const storageRef = ref(storage, storagePath);
 
-            // העלאה לאחסון
-            const { error: uploadError } = await supabase.storage.from('panoramas_bucket').upload(filePath, file);
-            
-            if (uploadError) {
-                alert('שגיאה בהעלאה: ' + uploadError.message);
+            try {
+                // העלאה ל-Storage
+                await uploadBytes(storageRef, file);
+                const publicUrl = await getDownloadURL(storageRef);
+
+                // שמירה ב-Firestore
+                await setDoc(doc(db, "panoramas", newId), {
+                    imageUrl: publicUrl,
+                    storagePath: storagePath,
+                    createdAt: new Date().toISOString()
+                });
+
+                // שמירת בעלות ב-LocalStorage ומעבר לדף
+                localStorage.setItem(`pano_owner_${newId}`, 'true');
+                window.location.href = `${window.location.pathname}?id=${newId}`;
+
+            } catch (error) {
+                console.error("Upload failed:", error);
+                alert('שגיאה בהעלאה. נסה שוב.');
                 elements.loader.style.display = "none";
                 elements.uploadBtn.classList.remove('hidden');
-                return;
-            }
-
-            // קבלת URL ציבורי
-            const { data: publicUrlData } = supabase.storage.from('panoramas_bucket').getPublicUrl(filePath);
-            const publicUrl = publicUrlData.publicUrl;
-
-            // שמירה בדאטה-בייס
-            const { data: dbData, error: dbError } = await supabase.from('panoramas').insert([
-                { image_url: publicUrl, storage_path: filePath }
-            ]).select().single();
-
-            if (dbError) {
-                alert('שגיאה בשמירת הנתונים.');
-            } else {
-                // שמירת בעלות בדפדפן
-                localStorage.setItem(`pano_owner_${dbData.id}`, 'true');
-                // טעינה מחדש עם ה-ID החדש
-                window.location.href = `${window.location.pathname}?id=${dbData.id}`;
             }
         });
 
@@ -146,15 +161,20 @@
             elements.loader.innerText = "מוחק...";
             elements.loader.style.display = "block";
 
-            // מחיקה מהאחסון
-            if (currentStoragePath) {
-                await supabase.storage.from('panoramas_bucket').remove([currentStoragePath]);
+            try {
+                if (currentStoragePath) {
+                    const storageRef = ref(storage, currentStoragePath);
+                    await deleteObject(storageRef);
+                }
+                await deleteDoc(doc(db, "panoramas", imageId));
+                
+                localStorage.removeItem(`pano_owner_${imageId}`);
+                window.location.href = window.location.pathname;
+            } catch (error) {
+                console.error("Delete failed:", error);
+                alert('שגיאה במחיקה.');
+                elements.loader.style.display = "none";
             }
-            // מחיקה מהטבלה
-            await supabase.from('panoramas').delete().eq('id', imageId);
-            
-            localStorage.removeItem(`pano_owner_${imageId}`);
-            window.location.href = window.location.pathname;
         });
 
         initViewer();
