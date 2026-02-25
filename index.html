@@ -20,8 +20,8 @@
         
         /* כפתור יציאה ממסך מלא (X) */
         #exit-fullscreen-btn {
-            position: absolute; top: 25px; left: 25px; /* ממוקם בצד שמאל למעלה בגלל ה-RTL */
-            z-index: 30; background: rgba(50, 50, 50, 0.5); /* אפור שקוף */
+            position: absolute; top: 25px; left: 25px;
+            z-index: 30; background: rgba(50, 50, 50, 0.5);
             color: rgba(255, 255, 255, 0.8); border: none; font-size: 32px; width: 50px; height: 50px;
             border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; padding-bottom: 4px; line-height: 1;
             backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
@@ -61,12 +61,9 @@
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
 
         let app, db, storage;
-        
-        // משתנה גלובלי לשמירת המופע של הנגן
         let panoViewer = null;
 
         try {
-            // --- ⚠️ חובה: הדבק כאן את ה-firebaseConfig שלך ---
             const firebaseConfig = {
               apiKey: "AIzaSyDzc2-dd4hUs05864kKgL6wjWjQdjvuWq0",
               authDomain: "pano-360-c4663.firebaseapp.com",
@@ -75,13 +72,12 @@
               messagingSenderId: "344991277519",
               appId: "1:344991277519:web:4ff6ad6dc30e65fa4ff2ba"
             };
-            // --------------------------------------------------
 
             app = initializeApp(firebaseConfig);
             db = getFirestore(app);
             storage = getStorage(app);
         } catch (err) {
-            alert("שגיאה בהגדרת Firebase. ודא שהעתקת את ה-firebaseConfig.");
+            alert("שגיאה בהגדרת Firebase.");
             console.error(err);
         }
 
@@ -117,17 +113,15 @@
                         const data = docSnap.data();
                         currentStoragePath = data.storagePath;
                         
-                        // יצירת הנגן ושמירתו במשתנה
                         panoViewer = pannellum.viewer('panorama', {
                             "type": "equirectangular",
                             "panorama": data.imageUrl,
                             "autoLoad": true,
                             "compass": false,
-                            "showControls": false, // אנו משתמשים בכפתורים שלנו
+                            "showControls": false,
                             "showFullscreenCtrl": false
                         });
 
-                        // הצגת כפתורי פעולה
                         elements.shareBtn.classList.remove('hidden');
                         elements.fullscreenBtn.classList.remove('hidden');
 
@@ -148,39 +142,41 @@
             }
         }
 
-        // --- ניהול מסך מלא ---
+        // --- ניהול מסך מלא משופר (עוקף חסימות iOS) ---
+        let isAppFullscreen = false;
 
-        // פונקציה המטפלת בשינוי מצב מסך מלא
-        function onFullScreenChange() {
-            const isFullScreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
-            if (isFullScreen) {
+        function toggleAppFullscreen() {
+            isAppFullscreen = !isAppFullscreen;
+            
+            if (isAppFullscreen) {
                 document.body.classList.add('is-fullscreen');
                 elements.exitFullscreenBtn.classList.remove('hidden');
+                
+                // ניסיון להפעיל מסך מלא מובנה באנדרואיד ומחשב (נכשל בשקט באייפון)
+                try {
+                    const docElm = document.documentElement;
+                    if (docElm.requestFullscreen) docElm.requestFullscreen();
+                    else if (docElm.webkitRequestFullscreen) docElm.webkitRequestFullscreen();
+                } catch(e) {}
+                
             } else {
                 document.body.classList.remove('is-fullscreen');
                 elements.exitFullscreenBtn.classList.add('hidden');
+                
+                // יציאה ממסך מלא מובנה
+                try {
+                    if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
+                    else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+                } catch(e) {}
             }
-             // תיקון לבאג רינדור של הנגן בעת שינוי גודל מסך
+            
+            // עדכון גודל הנגן כדי למנוע שטחים שחורים
             if (panoViewer) panoViewer.resize();
         }
 
-        // האזנה לאירועי שינוי מסך מלא בדפדפנים שונים
-        document.addEventListener('fullscreenchange', onFullScreenChange);
-        document.addEventListener('webkitfullscreenchange', onFullScreenChange);
-        document.addEventListener('mozfullscreenchange', onFullScreenChange);
-        document.addEventListener('MSFullscreenChange', onFullScreenChange);
-
-        // לחיצה על כפתור "מסך מלא" בתחתית
-        elements.fullscreenBtn.addEventListener('click', () => {
-            if(panoViewer) panoViewer.toggleFullscreen();
-        });
-
-        // לחיצה על כפתור ה-"X" למעלה
-        elements.exitFullscreenBtn.addEventListener('click', () => {
-            if(panoViewer) panoViewer.toggleFullscreen();
-        });
-
-        // ----------------------
+        elements.fullscreenBtn.addEventListener('click', toggleAppFullscreen);
+        elements.exitFullscreenBtn.addEventListener('click', toggleAppFullscreen);
+        // ---------------------------------------------
 
         elements.fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
