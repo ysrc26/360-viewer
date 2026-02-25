@@ -2,23 +2,40 @@
 <html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>360 Viewer</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css"/>
     <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; background: #111; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
         #panorama { width: 100%; height: 100%; }
-        .controls { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 10; }
+        
+        /* מיכל הכפתורים התחתון */
+        .controls { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 10; transition: opacity 0.3s; }
         
         /* עיצוב אחיד לכפתורים וללייבל */
-        .action-btn { background: rgba(255, 255, 255, 0.9); border: none; padding: 12px 24px; border-radius: 30px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: 0.2s; color: #333; display: inline-block; text-align: center; }
+        .action-btn { background: rgba(255, 255, 255, 0.9); border: none; padding: 12px 24px; border-radius: 30px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: 0.2s; color: #333; display: inline-block; text-align: center; white-space: nowrap; }
         .action-btn:active { transform: scale(0.95); }
         #delete-btn { background: rgba(255, 60, 60, 0.9); color: white; }
+        
+        /* כפתור יציאה ממסך מלא (X) */
+        #exit-fullscreen-btn {
+            position: absolute; top: 25px; left: 25px; /* ממוקם בצד שמאל למעלה בגלל ה-RTL */
+            z-index: 30; background: rgba(50, 50, 50, 0.5); /* אפור שקוף */
+            color: rgba(255, 255, 255, 0.8); border: none; font-size: 32px; width: 50px; height: 50px;
+            border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; padding-bottom: 4px; line-height: 1;
+            backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
+        }
         
         #file-input { display: none; }
         #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 20px; font-weight: bold; z-index: 20; display: none; background: rgba(0,0,0,0.7); padding: 20px; border-radius: 10px; text-align: center; }
         .hidden { display: none !important; }
+
+        /* הסתרת הלוגו והמקרא של ספריית הפנורמה */
+        .pnlm-load-box, .pnlm-about-msg { display: none !important; }
+
+        /* מחלקה שנוספת לגוף העמוד במצב מסך מלא */
+        body.is-fullscreen .controls { opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -26,25 +43,30 @@
     <div id="panorama"></div>
     <div id="loader">מעלה תמונה, אנא המתן...</div>
 
+    <button id="exit-fullscreen-btn" class="hidden">×</button>
+
     <div class="controls">
         <label id="upload-label" class="action-btn">
             העלאת תמונה
             <input type="file" id="file-input" accept="image/*" />
         </label>
         <button id="share-btn" class="action-btn hidden">שיתוף</button>
+        <button id="fullscreen-btn" class="action-btn hidden">מסך מלא</button>
         <button id="delete-btn" class="action-btn hidden">מחיקה</button>
     </div>
 
     <script type="module">
-        // ייבוא מגרסה 12.9.0
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-app.js";
         import { getFirestore, doc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
         import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
 
         let app, db, storage;
         
+        // משתנה גלובלי לשמירת המופע של הנגן
+        let panoViewer = null;
+
         try {
-            // שים לב: הדבק את ההגדרות המדויקות שלך כאן ושמור על המבנה
+            // --- ⚠️ חובה: הדבק כאן את ה-firebaseConfig שלך ---
             const firebaseConfig = {
               apiKey: "AIzaSyDzc2-dd4hUs05864kKgL6wjWjQdjvuWq0",
               authDomain: "pano-360-c4663.firebaseapp.com",
@@ -53,12 +75,13 @@
               messagingSenderId: "344991277519",
               appId: "1:344991277519:web:4ff6ad6dc30e65fa4ff2ba"
             };
+            // --------------------------------------------------
 
             app = initializeApp(firebaseConfig);
             db = getFirestore(app);
             storage = getStorage(app);
         } catch (err) {
-            alert("שגיאה בהגדרת Firebase. ודא שהעתקת את ה-firebaseConfig נכון וללא טעויות תחביר.");
+            alert("שגיאה בהגדרת Firebase. ודא שהעתקת את ה-firebaseConfig.");
             console.error(err);
         }
 
@@ -70,6 +93,8 @@
             fileInput: document.getElementById('file-input'),
             uploadLabel: document.getElementById('upload-label'),
             shareBtn: document.getElementById('share-btn'),
+            fullscreenBtn: document.getElementById('fullscreen-btn'),
+            exitFullscreenBtn: document.getElementById('exit-fullscreen-btn'),
             deleteBtn: document.getElementById('delete-btn'),
             loader: document.getElementById('loader')
         };
@@ -92,15 +117,20 @@
                         const data = docSnap.data();
                         currentStoragePath = data.storagePath;
                         
-                        pannellum.viewer('panorama', {
+                        // יצירת הנגן ושמירתו במשתנה
+                        panoViewer = pannellum.viewer('panorama', {
                             "type": "equirectangular",
                             "panorama": data.imageUrl,
                             "autoLoad": true,
                             "compass": false,
-                            "showControls": false
+                            "showControls": false, // אנו משתמשים בכפתורים שלנו
+                            "showFullscreenCtrl": false
                         });
 
+                        // הצגת כפתורי פעולה
                         elements.shareBtn.classList.remove('hidden');
+                        elements.fullscreenBtn.classList.remove('hidden');
+
                         if (localStorage.getItem(`pano_owner_${imageId}`)) {
                             elements.deleteBtn.classList.remove('hidden');
                         }
@@ -114,9 +144,43 @@
                     alert('שגיאה בטעינת התמונה.');
                 }
             } else if (!imageId) {
-                elements.panorama.innerHTML = '<div style="color:#666; display:flex; height:100%; align-items:center; justify-content:center; font-size:24px;">לחץ על העלאת תמונה כדי להתחיל</div>';
+                elements.panorama.innerHTML = '<div style="color:#666; display:flex; height:100%; align-items:center; justify-content:center; font-size:24px; text-align:center;">לחץ על העלאת תמונה<br>כדי להתחיל</div>';
             }
         }
+
+        // --- ניהול מסך מלא ---
+
+        // פונקציה המטפלת בשינוי מצב מסך מלא
+        function onFullScreenChange() {
+            const isFullScreen = document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement;
+            if (isFullScreen) {
+                document.body.classList.add('is-fullscreen');
+                elements.exitFullscreenBtn.classList.remove('hidden');
+            } else {
+                document.body.classList.remove('is-fullscreen');
+                elements.exitFullscreenBtn.classList.add('hidden');
+            }
+             // תיקון לבאג רינדור של הנגן בעת שינוי גודל מסך
+            if (panoViewer) panoViewer.resize();
+        }
+
+        // האזנה לאירועי שינוי מסך מלא בדפדפנים שונים
+        document.addEventListener('fullscreenchange', onFullScreenChange);
+        document.addEventListener('webkitfullscreenchange', onFullScreenChange);
+        document.addEventListener('mozfullscreenchange', onFullScreenChange);
+        document.addEventListener('MSFullscreenChange', onFullScreenChange);
+
+        // לחיצה על כפתור "מסך מלא" בתחתית
+        elements.fullscreenBtn.addEventListener('click', () => {
+            if(panoViewer) panoViewer.toggleFullscreen();
+        });
+
+        // לחיצה על כפתור ה-"X" למעלה
+        elements.exitFullscreenBtn.addEventListener('click', () => {
+            if(panoViewer) panoViewer.toggleFullscreen();
+        });
+
+        // ----------------------
 
         elements.fileInput.addEventListener('change', async (e) => {
             const file = e.target.files[0];
@@ -137,24 +201,21 @@
             const storageRef = ref(storage, storagePath);
 
             try {
-                // העלאה ל-Storage
                 await uploadBytes(storageRef, file);
                 const publicUrl = await getDownloadURL(storageRef);
 
-                // שמירה ב-Firestore
                 await setDoc(doc(db, "panoramas", newId), {
                     imageUrl: publicUrl,
                     storagePath: storagePath,
                     createdAt: new Date().toISOString()
                 });
 
-                // שמירת בעלות ב-LocalStorage ומעבר לדף
                 localStorage.setItem(`pano_owner_${newId}`, 'true');
                 window.location.href = `${window.location.pathname}?id=${newId}`;
 
             } catch (error) {
                 console.error("Upload failed:", error);
-                alert('שגיאה בהעלאה. בדוק את חוקי האבטחה (Rules) בפיירבייס.');
+                alert('שגיאה בהעלאה. בדוק חיבור רשת.');
                 elements.loader.style.display = "none";
                 elements.uploadLabel.classList.remove('hidden');
             }
@@ -173,17 +234,14 @@
 
         elements.deleteBtn.addEventListener('click', async () => {
             if (!confirm('למחוק את התמונה? הפעולה בלתי הפיכה והקישור יפסיק לעבוד.')) return;
-
             elements.loader.innerText = "מוחק...";
             elements.loader.style.display = "block";
-
             try {
                 if (currentStoragePath) {
                     const storageRef = ref(storage, currentStoragePath);
                     await deleteObject(storageRef);
                 }
                 await deleteDoc(doc(db, "panoramas", imageId));
-                
                 localStorage.removeItem(`pano_owner_${imageId}`);
                 window.location.href = window.location.pathname;
             } catch (error) {
