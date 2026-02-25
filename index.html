@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>360 Viewer</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css"/>
+    <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; background: #111; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+        #panorama { width: 100%; height: 100%; }
+        .controls { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 10; }
+        button { background: rgba(255, 255, 255, 0.9); border: none; padding: 12px 24px; border-radius: 30px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: 0.2s; color: #333; }
+        button:active { transform: scale(0.95); }
+        #delete-btn { background: rgba(255, 60, 60, 0.9); color: white; }
+        #file-input { display: none; }
+        #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 20px; font-weight: bold; z-index: 20; display: none; background: rgba(0,0,0,0.7); padding: 20px; border-radius: 10px; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <div id="panorama"></div>
+    <div id="loader">מעלה תמונה, אנא המתן...</div>
+
+    <div class="controls">
+        <input type="file" id="file-input" accept="image/*" />
+        <button id="upload-btn">העלאת תמונה</button>
+        <button id="share-btn" class="hidden">שיתוף</button>
+        <button id="delete-btn" class="hidden">מחיקה</button>
+    </div>
+
+    <script>
+        // הכנס כאן את הנתונים מהפרויקט שלך ב-Supabase
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const imageId = urlParams.get('id');
+
+        const elements = {
+            panorama: document.getElementById('panorama'),
+            fileInput: document.getElementById('file-input'),
+            uploadBtn: document.getElementById('upload-btn'),
+            shareBtn: document.getElementById('share-btn'),
+            deleteBtn: document.getElementById('delete-btn'),
+            loader: document.getElementById('loader')
+        };
+
+        let currentStoragePath = null;
+
+        async function initViewer() {
+            if (imageId) {
+                elements.uploadBtn.classList.add('hidden');
+                elements.loader.innerText = "טוען תמונה...";
+                elements.loader.style.display = "block";
+
+                const { data, error } = await supabase.from('panoramas').select('*').eq('id', imageId).single();
+                
+                elements.loader.style.display = "none";
+
+                if (data) {
+                    currentStoragePath = data.storage_path;
+                    pannellum.viewer('panorama', {
+                        "type": "equirectangular",
+                        "panorama": data.image_url,
+                        "autoLoad": true,
+                        "compass": false,
+                        "showControls": false
+                    });
+
+                    elements.shareBtn.classList.remove('hidden');
+                    // הצג כפתור מחיקה רק אם המשתמש הוא זה שהעלה את התמונה (לפי LocalStorage)
+                    if (localStorage.getItem(`pano_owner_${imageId}`)) {
+                        elements.deleteBtn.classList.remove('hidden');
+                    }
+                } else {
+                    alert('התמונה לא נמצאה או שנמחקה.');
+                    window.location.href = window.location.pathname;
+                }
+            } else {
+                // מסך ריק להעלאה
+                elements.panorama.innerHTML = '<div style="color:#666; display:flex; height:100%; align-items:center; justify-content:center; font-size:24px;">לחץ על העלאת תמונה כדי להתחיל</div>';
+            }
+        }
+
+        elements.uploadBtn.addEventListener('click', () => elements.fileInput.click());
+
+        elements.fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            elements.loader.innerText = "מעלה תמונה, אנא המתן...";
+            elements.loader.style.display = "block";
+            elements.uploadBtn.classList.add('hidden');
+
+            const fileExt = file.name.split('.').pop();
+            const fileName = `${Math.random().toString(36).substring(2)}_${Date.now()}.${fileExt}`;
+            const filePath = `public/${fileName}`;
+
+            // העלאה לאחסון
+            const { error: uploadError } = await supabase.storage.from('panoramas_bucket').upload(filePath, file);
+            
+            if (uploadError) {
+                alert('שגיאה בהעלאה: ' + uploadError.message);
+                elements.loader.style.display = "none";
+                elements.uploadBtn.classList.remove('hidden');
+                return;
+            }
+
+            // קבלת URL ציבורי
+            const { data: publicUrlData } = supabase.storage.from('panoramas_bucket').getPublicUrl(filePath);
+            const publicUrl = publicUrlData.publicUrl;
+
+            // שמירה בדאטה-בייס
+            const { data: dbData, error: dbError } = await supabase.from('panoramas').insert([
+                { image_url: publicUrl, storage_path: filePath }
+            ]).select().single();
+
+            if (dbError) {
+                alert('שגיאה בשמירת הנתונים.');
+            } else {
+                // שמירת בעלות בדפדפן
+                localStorage.setItem(`pano_owner_${dbData.id}`, 'true');
+                // טעינה מחדש עם ה-ID החדש
+                window.location.href = `${window.location.pathname}?id=${dbData.id}`;
+            }
+        });
+
+        elements.shareBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(window.location.href);
+                const originalText = elements.shareBtn.innerText;
+                elements.shareBtn.innerText = "הקישור הועתק!";
+                setTimeout(() => elements.shareBtn.innerText = originalText, 2000);
+            } catch (err) {
+                alert('שגיאה בהעתקת הקישור');
+            }
+        });
+
+        elements.deleteBtn.addEventListener('click', async () => {
+            if (!confirm('למחוק את התמונה? הפעולה בלתי הפיכה והקישור יפסיק לעבוד.')) return;
+
+            elements.loader.innerText = "מוחק...";
+            elements.loader.style.display = "block";
+
+            // מחיקה מהאחסון
+            if (currentStoragePath) {
+                await supabase.storage.from('panoramas_bucket').remove([currentStoragePath]);
+            }
+            // מחיקה מהטבלה
+            await supabase.from('panoramas').delete().eq('id', imageId);
+            
+            localStorage.removeItem(`pano_owner_${imageId}`);
+            window.location.href = window.location.pathname;
+        });
+
+        initViewer();
+    </script>
+</body>
+</html>
