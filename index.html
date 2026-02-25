@@ -2,26 +2,31 @@
 <html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    
     <title>360 Viewer</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css"/>
     <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
     <style>
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; background: #111; font-family: system-ui, -apple-system, sans-serif; overflow: hidden; }
+        
+        /* מצב רגיל */
+        #panorama-container { position: relative; width: 100%; height: 100dvh; }
         #panorama { width: 100%; height: 100%; }
         
-        /* מיכל הכפתורים התחתון */
         .controls { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 15px; z-index: 10; transition: opacity 0.3s; }
         
-        /* עיצוב אחיד לכפתורים וללייבל */
         .action-btn { background: rgba(255, 255, 255, 0.9); border: none; padding: 12px 24px; border-radius: 30px; font-size: 16px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: 0.2s; color: #333; display: inline-block; text-align: center; white-space: nowrap; }
         .action-btn:active { transform: scale(0.95); }
         #delete-btn { background: rgba(255, 60, 60, 0.9); color: white; }
         
-        /* כפתור יציאה ממסך מלא (X) */
         #exit-fullscreen-btn {
-            position: absolute; top: 25px; left: 25px;
-            z-index: 30; background: rgba(50, 50, 50, 0.5);
+            position: fixed; top: 25px; left: 25px;
+            z-index: 9999; background: rgba(50, 50, 50, 0.5);
             color: rgba(255, 255, 255, 0.8); border: none; font-size: 32px; width: 50px; height: 50px;
             border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; padding-bottom: 4px; line-height: 1;
             backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
@@ -30,17 +35,25 @@
         #file-input { display: none; }
         #loader { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-size: 20px; font-weight: bold; z-index: 20; display: none; background: rgba(0,0,0,0.7); padding: 20px; border-radius: 10px; text-align: center; }
         .hidden { display: none !important; }
-
-        /* הסתרת הלוגו והמקרא של ספריית הפנורמה */
         .pnlm-load-box, .pnlm-about-msg { display: none !important; }
 
-        /* מחלקה שנוספת לגוף העמוד במצב מסך מלא */
+        /* כפיית מצב צפייה מקסימלי באייפון באמצעות CSS */
+        body.is-fullscreen #panorama-container {
+            position: fixed !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100vw !important;
+            height: 100dvh !important;
+            z-index: 9998 !important;
+        }
         body.is-fullscreen .controls { opacity: 0; pointer-events: none; }
     </style>
 </head>
 <body>
 
-    <div id="panorama"></div>
+    <div id="panorama-container">
+        <div id="panorama"></div>
+    </div>
     <div id="loader">מעלה תמונה, אנא המתן...</div>
 
     <button id="exit-fullscreen-btn" class="hidden">×</button>
@@ -85,7 +98,7 @@
         const imageId = urlParams.get('id');
 
         const elements = {
-            panorama: document.getElementById('panorama'),
+            panoramaContainer: document.getElementById('panorama-container'),
             fileInput: document.getElementById('file-input'),
             uploadLabel: document.getElementById('upload-label'),
             shareBtn: document.getElementById('share-btn'),
@@ -138,11 +151,11 @@
                     alert('שגיאה בטעינת התמונה.');
                 }
             } else if (!imageId) {
-                elements.panorama.innerHTML = '<div style="color:#666; display:flex; height:100%; align-items:center; justify-content:center; font-size:24px; text-align:center;">לחץ על העלאת תמונה<br>כדי להתחיל</div>';
+                document.getElementById('panorama').innerHTML = '<div style="color:#666; display:flex; height:100%; align-items:center; justify-content:center; font-size:24px; text-align:center;">לחץ על העלאת תמונה<br>כדי להתחיל</div>';
             }
         }
 
-        // --- ניהול מסך מלא משופר (עוקף חסימות iOS) ---
+        // --- ניהול מסך מלא קשיח (כפיית CSS באייפון + API אמיתי באחרים) ---
         let isAppFullscreen = false;
 
         function toggleAppFullscreen() {
@@ -152,9 +165,9 @@
                 document.body.classList.add('is-fullscreen');
                 elements.exitFullscreenBtn.classList.remove('hidden');
                 
-                // ניסיון להפעיל מסך מלא מובנה באנדרואיד ומחשב (נכשל בשקט באייפון)
+                // ניסיון להפעיל מסך מלא אמיתי (יעבוד באנדרואיד/דסקטופ, ייכשל בשקט באייפון)
                 try {
-                    const docElm = document.documentElement;
+                    const docElm = elements.panoramaContainer;
                     if (docElm.requestFullscreen) docElm.requestFullscreen();
                     else if (docElm.webkitRequestFullscreen) docElm.webkitRequestFullscreen();
                 } catch(e) {}
@@ -163,15 +176,17 @@
                 document.body.classList.remove('is-fullscreen');
                 elements.exitFullscreenBtn.classList.add('hidden');
                 
-                // יציאה ממסך מלא מובנה
+                // יציאה ממסך מלא אמיתי
                 try {
                     if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen();
                     else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
                 } catch(e) {}
             }
             
-            // עדכון גודל הנגן כדי למנוע שטחים שחורים
-            if (panoViewer) panoViewer.resize();
+            // השהיה קלה כדי לתת לדפדפן לסיים למתוח את ה-DOM ואז לעדכן את ה-Canvas של ה-360
+            setTimeout(() => {
+                if (panoViewer) panoViewer.resize();
+            }, 100);
         }
 
         elements.fullscreenBtn.addEventListener('click', toggleAppFullscreen);
